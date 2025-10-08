@@ -281,17 +281,6 @@ class _SignupScreenState extends State<SignupScreen> {
   final _confirmController = TextEditingController();
   bool _obscure = true;
 
-  // Return null when password is strong, or an error message otherwise.
-  String? _passwordValidationMessage(String s) {
-    final str = s.trim();
-    if (str.length < 8) return 'Password must be at least 8 characters';
-    if (!RegExp(r'[A-Z]').hasMatch(str)) return 'Include at least one uppercase letter';
-    if (!RegExp(r'[a-z]').hasMatch(str)) return 'Include at least one lowercase letter';
-    if (!RegExp(r'\d').hasMatch(str)) return 'Include at least one digit';
-    if (!RegExp(r'[!@#\$%\^&*(),.?":{}|<>]').hasMatch(str)) return 'Include at least one special character';
-    return null;
-  }
-
   @override
   void dispose() {
     _nameController.dispose();
@@ -302,18 +291,10 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   void _submit() {
-    // run form validators first
-    final formOk = _formKey.currentState?.validate() ?? false;
-    if (!formOk) return;
-    // double-check password strength programmatically (defensive)
-    final pwMsg = _passwordValidationMessage(_passwordController.text);
-    if (pwMsg != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(pwMsg)));
-      return;
+    if (_formKey.currentState?.validate() ?? false) {
+      // For prototype, navigate to OTP verification
+      Navigator.of(context).pushReplacementNamed('/verify-otp');
     }
-    // For prototype, navigate to OTP verification
-    Navigator.of(context).pushReplacementNamed('/verify-otp');
-  }
   }
 
   @override
