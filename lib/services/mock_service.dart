@@ -17,6 +17,7 @@ class MockService {
   final List<AppUser> users = [];
   final List<Group> groups = [];
   final List<Expense> expenses = [];
+  final List<Map<String, dynamic>> settlements = [];
 
   void _init() {
     // create some mock users
@@ -136,7 +137,25 @@ class MockService {
       final v = e.splits[userId] ?? 0.0;
       sum += v;
     }
+    // subtract any applied settlements where this user was the debtor
+    for (final s in settlements) {
+      if (s['debtor'] == userId) {
+        sum -= (s['amount'] as double);
+      }
+    }
+    // don't return negative owed amount
+    if (sum < 0) return 0.0;
     return sum;
+  }
+
+  /// Register a settlement where [debtorId] paid [amount] to [creditorId].
+  void applySettlement(String debtorId, String creditorId, double amount) {
+    settlements.add({
+      'debtor': debtorId,
+      'creditor': creditorId,
+      'amount': amount,
+      'date': DateTime.now(),
+    });
   }
 
   AppUser? findUserByEmail(String email) {
@@ -146,11 +165,25 @@ class MockService {
     return null;
   }
 
+  // When the UI explicitly wants to add a member by email (create group flow),
+  // create and register a user if they don't already exist.
+  AppUser getOrCreateUserByEmail(String email) {
+    final existing = findUserByEmail(email);
+    if (existing != null) return existing;
+    final newUser = AppUser(
+      id: _uuid.v4(),
+      name: email.split('@').first,
+      email: email,
+      emoji: '🙂',
+    );
+    users.add(newUser);
+    return newUser;
+  }
+
   Group createGroup(String name, String emoji, List<String> memberEmails) {
     final members = memberEmails
-        .map((m) => findUserByEmail(m))
-        .where((u) => u != null)
-        .map((u) => GroupMember(user: u!))
+        .map((m) => getOrCreateUserByEmail(m))
+        .map((u) => GroupMember(user: u))
         .toList();
     final g = Group(
       id: _uuid.v4(),

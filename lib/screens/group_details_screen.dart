@@ -428,6 +428,13 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
     setState(() {
       _appliedSettlementKeys.addAll(chosenKeys);
     });
+    // record settlements in the service so owed totals update elsewhere
+    for (final s in chosen) {
+      final creditorId = s.key;
+      final debtorId = s.value.key;
+      final amount = s.value.value;
+      svc.applySettlement(debtorId, creditorId, amount);
+    }
     final msg = chosen
         .map((s) {
           final creditor = _userNameById(s.key);
@@ -531,7 +538,19 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
                         onPressed: () {
                           final email = emailC.text.trim();
                           if (email.isEmpty) return;
-                          final user = svc.findUserByEmail(email)!;
+                          final emailReg = RegExp(
+                            r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+                          );
+                          if (!emailReg.hasMatch(email)) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Enter a valid email'),
+                              ),
+                            );
+                            return;
+                          }
+                          // create or get user explicitly for group editing
+                          final user = svc.getOrCreateUserByEmail(email);
                           // avoid duplicates
                           if (g.members.any((mm) => mm.user.id == user.id))
                             return;

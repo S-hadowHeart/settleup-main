@@ -215,7 +215,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     obscureText: _obscure,
                     validator: (v) {
                       if (v == null || v.isEmpty) return 'Enter password';
-                      if (v.length < 6) return 'Password too short';
+                      final s = v.trim();
+                      if (s.length < 8)
+                        return 'Password must be at least 8 characters';
+                      if (!RegExp(r'[A-Z]').hasMatch(s))
+                        return 'Include at least one uppercase letter';
+                      if (!RegExp(r'[a-z]').hasMatch(s))
+                        return 'Include at least one lowercase letter';
+                      if (!RegExp(r'\d').hasMatch(s))
+                        return 'Include at least one digit';
+                      if (!RegExp(r'[!@#\$%\^&*(),.?":{}|<>]').hasMatch(s))
+                        return 'Include at least one special character';
                       return null;
                     },
                   ),
@@ -271,6 +281,17 @@ class _SignupScreenState extends State<SignupScreen> {
   final _confirmController = TextEditingController();
   bool _obscure = true;
 
+  // Return null when password is strong, or an error message otherwise.
+  String? _passwordValidationMessage(String s) {
+    final str = s.trim();
+    if (str.length < 8) return 'Password must be at least 8 characters';
+    if (!RegExp(r'[A-Z]').hasMatch(str)) return 'Include at least one uppercase letter';
+    if (!RegExp(r'[a-z]').hasMatch(str)) return 'Include at least one lowercase letter';
+    if (!RegExp(r'\d').hasMatch(str)) return 'Include at least one digit';
+    if (!RegExp(r'[!@#\$%\^&*(),.?":{}|<>]').hasMatch(str)) return 'Include at least one special character';
+    return null;
+  }
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -281,10 +302,18 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   void _submit() {
-    if (_formKey.currentState?.validate() ?? false) {
-      // For prototype, navigate to OTP verification
-      Navigator.of(context).pushReplacementNamed('/verify-otp');
+    // run form validators first
+    final formOk = _formKey.currentState?.validate() ?? false;
+    if (!formOk) return;
+    // double-check password strength programmatically (defensive)
+    final pwMsg = _passwordValidationMessage(_passwordController.text);
+    if (pwMsg != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(pwMsg)));
+      return;
     }
+    // For prototype, navigate to OTP verification
+    Navigator.of(context).pushReplacementNamed('/verify-otp');
+  }
   }
 
   @override
@@ -338,7 +367,17 @@ class _SignupScreenState extends State<SignupScreen> {
                     obscureText: _obscure,
                     validator: (v) {
                       if (v == null || v.isEmpty) return 'Enter password';
-                      if (v.length < 6) return 'Password too short';
+                      final s = v.trim();
+                      if (s.length < 8)
+                        return 'Password must be at least 8 characters';
+                      if (!RegExp(r'[A-Z]').hasMatch(s))
+                        return 'Include at least one uppercase letter';
+                      if (!RegExp(r'[a-z]').hasMatch(s))
+                        return 'Include at least one lowercase letter';
+                      if (!RegExp(r'\d').hasMatch(s))
+                        return 'Include at least one digit';
+                      if (!RegExp(r'[!@#\$%\^&*(),.?":{}|<>]').hasMatch(s))
+                        return 'Include at least one special character';
                       return null;
                     },
                   ),
@@ -397,15 +436,16 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
   }
 
   void _verify() {
-    if ((_codeController.text.trim()).length >= 4) {
+    final code = _codeController.text.trim();
+    if (RegExp(r'^\d{4}$').hasMatch(code)) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('OTP verified (prototype)')));
+      ).showSnackBar(const SnackBar(content: Text('OTP verified')));
       Navigator.of(context).pushReplacementNamed('/login');
     } else {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Enter valid OTP')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter valid 4-digit numeric OTP')),
+      );
     }
   }
 
@@ -543,12 +583,13 @@ class _ForgotPasswordOtpScreenState extends State<ForgotPasswordOtpScreen> {
   }
 
   void _verifyOtp() {
-    if (_codeController.text.trim().length >= 4) {
+    final code = _codeController.text.trim();
+    if (RegExp(r'^\d{4}$').hasMatch(code)) {
       Navigator.of(context).pushReplacementNamed('/forgot-newpass');
     } else {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Enter valid OTP')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter valid 4-digit numeric OTP')),
+      );
     }
   }
 
@@ -615,9 +656,9 @@ class _ForgotPasswordNewPassScreenState
 
   void _save() {
     if (_formKey.currentState?.validate() ?? false) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password reset (prototype)')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Password reset')));
       Navigator.of(context).pushReplacementNamed('/login');
     }
   }
@@ -650,7 +691,17 @@ class _ForgotPasswordNewPassScreenState
                     obscureText: _obscure,
                     validator: (v) {
                       if (v == null || v.isEmpty) return 'Enter password';
-                      if (v.length < 6) return 'Password too short';
+                      final s = v.trim();
+                      if (s.length < 8)
+                        return 'Password must be at least 8 characters';
+                      if (!RegExp(r'[A-Z]').hasMatch(s))
+                        return 'Include at least one uppercase letter';
+                      if (!RegExp(r'[a-z]').hasMatch(s))
+                        return 'Include at least one lowercase letter';
+                      if (!RegExp(r'\d').hasMatch(s))
+                        return 'Include at least one digit';
+                      if (!RegExp(r'[!@#\$%\^&*(),.?":{}|<>]').hasMatch(s))
+                        return 'Include at least one special character';
                       return null;
                     },
                   ),
