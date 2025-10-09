@@ -281,7 +281,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
               const SizedBox(height: 8),
               if (_attachmentPath != null)
                 Text(
-                  'Attached: $_attachmentPath',
+                  'Attached: Added successfully',
                   style: const TextStyle(fontSize: 12),
                 ),
             ],
