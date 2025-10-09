@@ -202,7 +202,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: const Text('About'),
               onTap: () => showAboutDialog(
                 context: context,
-                applicationName: 'SettleUp (prototype)',
+                applicationName: 'SettleUp',
                 applicationVersion: '0.1',
                 children: [const Text('A simple bill splitting prototype')],
               ),
@@ -247,9 +247,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onPressed: () {
                           Navigator.of(context).pop();
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Password changed (prototype)'),
-                            ),
+                            const SnackBar(content: Text('Password changed')),
                           );
                         },
                         child: const Text('Change'),

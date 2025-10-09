@@ -33,16 +33,16 @@ class MockService {
     users.add(
       AppUser(
         id: _uuid.v4(),
-        name: 'Alice',
-        email: 'alice@example.com',
+        name: 'Nico',
+        email: 'nico@galaxy.com',
         emoji: '🧑‍🍳',
       ),
     );
     users.add(
       AppUser(
         id: _uuid.v4(),
-        name: 'Bob',
-        email: 'bob@example.com',
+        name: 'Amit',
+        email: 'amit@galaxy.com',
         emoji: '🧑‍🔧',
       ),
     );

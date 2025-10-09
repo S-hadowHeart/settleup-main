@@ -567,11 +567,7 @@ class _ForgotPasswordOtpScreenState extends State<ForgotPasswordOtpScreen> {
     final code = _codeController.text.trim();
     if (RegExp(r'^\d{4}$').hasMatch(code)) {
       Navigator.of(context).pushReplacementNamed('/forgot-newpass');
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter valid 4-digit numeric OTP')),
-      );
-    }
+    } else {}
   }
 
   @override
