@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -12,17 +14,68 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscure = true;
+  bool _loading = false;
 
-  @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
+  Future<void> _ensureUserDoc(User user) async {
+    final ref = FirebaseFirestore.instance.collection("users").doc(user.uid);
+    final doc = await ref.get();
+    if (!doc.exists) {
+      await ref.set({
+        "name": user.email!.split('@')[0],
+        "email": user.email,
+        "emoji": "🙂",
+        "avatarUrl": null,
+        "createdAt": FieldValue.serverTimestamp(),
+      });
+    }
   }
 
-  void _trySubmit() {
-    if (_formKey.currentState?.validate() ?? false) {
-      Navigator.of(context).pushReplacementNamed('/home');
+  Future<void> _trySubmit() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() => _loading = true);
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    try {
+      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      final user = credential.user;
+      if (user == null) throw Exception("No user");
+      if (!user.emailVerified) {
+        await user.sendEmailVerification();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Please verify your email. Verification sent."),
+          ),
+        );
+        setState(() => _loading = false);
+        Navigator.pushReplacementNamed(context, '/verify-otp');
+        return;
+      }
+
+      await _ensureUserDoc(user);
+
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/home');
+    } on FirebaseAuthException catch (e) {
+      String message = "Login failed.";
+      if (e.code == 'user-not-found')
+        message = "No account found for that email.";
+      else if (e.code == 'wrong-password')
+        message = "Incorrect password.";
+      else if (e.code == 'invalid-email')
+        message = "Invalid email address.";
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Unexpected error occurred.")),
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -50,9 +103,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return 'Enter email';
                       final emailReg = RegExp(r"^[^@\s]+@[^@\s]+\.[^@\s]+$");
-                      if (!emailReg.hasMatch(v.trim())) {
+                      if (!emailReg.hasMatch(v.trim()))
                         return 'Enter a valid email';
-                      }
                       return null;
                     },
                   ),
@@ -72,17 +124,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     obscureText: _obscure,
                     validator: (v) {
                       if (v == null || v.isEmpty) return 'Enter password';
-                      final s = v.trim();
-                      if (s.length < 8)
-                        return 'Password must be at least 8 characters';
-                      if (!RegExp(r'[A-Z]').hasMatch(s))
-                        return 'Include at least one uppercase letter';
-                      if (!RegExp(r'[a-z]').hasMatch(s))
-                        return 'Include at least one lowercase letter';
-                      if (!RegExp(r'\d').hasMatch(s))
-                        return 'Include at least one digit';
-                      if (!RegExp(r'[!@#\$%\^&*(),.?":{}|<>]').hasMatch(s))
-                        return 'Include at least one special character';
                       return null;
                     },
                   ),
@@ -91,26 +132,29 @@ class _LoginScreenState extends State<LoginScreen> {
                     children: [
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: _trySubmit,
-                          child: const Text('Login'),
+                          onPressed: _loading ? null : _trySubmit,
+                          child: _loading
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Login'),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
                   TextButton(
-                    onPressed: () {
-                      // Navigate to forgot password flow
-                      Navigator.of(context).pushNamed('/forgot-email');
-                    },
+                    onPressed: () =>
+                        Navigator.of(context).pushNamed('/forgot-email'),
                     child: const Text('Forgot password?'),
                   ),
                   const SizedBox(height: 8),
                   OutlinedButton(
-                    onPressed: () {
-                      // Navigate to signup
-                      Navigator.of(context).pushNamed('/signup');
-                    },
+                    onPressed: () => Navigator.of(context).pushNamed('/signup'),
                     child: const Text('Create account'),
                   ),
                 ],

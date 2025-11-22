@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -13,7 +15,9 @@ class _SignupScreenState extends State<SignupScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
+
   bool _obscure = true;
+  bool _loading = false;
 
   @override
   void dispose() {
@@ -24,11 +28,63 @@ class _SignupScreenState extends State<SignupScreen> {
     super.dispose();
   }
 
-  void _submit() {
-    if (_formKey.currentState?.validate() ?? false) {
-      // For prototype, navigate to OTP verification
-      Navigator.of(context).pushReplacementNamed('/verify-otp');
+  Future<void> _submit() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    setState(() => _loading = true);
+
+    final name = _nameController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    try {
+      final credential = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(email: email, password: password);
+
+      final user = credential.user;
+      final uid = user?.uid;
+
+      if (uid == null) throw Exception("User UID is null");
+
+      await user!.sendEmailVerification();
+
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+        'name': name,
+        'email': email,
+        'emoji': "🙂",
+        'avatarUrl': null,
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Account created! Please verify your email."),
+        ),
+      );
+
+      Navigator.pushReplacementNamed(context, '/verify-otp');
+    } on FirebaseAuthException catch (e) {
+      String message = "Signup failed.";
+      if (e.code == 'email-already-in-use')
+        message = "That email is already registered.";
+      else if (e.code == 'invalid-email')
+        message = "Invalid email address.";
+      else if (e.code == 'weak-password')
+        message = "Password is too weak.";
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Unexpected error: $e")));
     }
+
+    if (mounted) setState(() => _loading = false);
   }
 
   @override
@@ -83,16 +139,12 @@ class _SignupScreenState extends State<SignupScreen> {
                     validator: (v) {
                       if (v == null || v.isEmpty) return 'Enter password';
                       final s = v.trim();
-                      if (s.length < 8)
-                        return 'Password must be at least 8 characters';
-                      if (!RegExp(r'[A-Z]').hasMatch(s))
-                        return 'Include at least one uppercase letter';
-                      if (!RegExp(r'[a-z]').hasMatch(s))
-                        return 'Include at least one lowercase letter';
-                      if (!RegExp(r'\d').hasMatch(s))
-                        return 'Include at least one digit';
+                      if (s.length < 8) return 'Min 8 characters';
+                      if (!RegExp(r'[A-Z]').hasMatch(s)) return 'Add uppercase';
+                      if (!RegExp(r'[a-z]').hasMatch(s)) return 'Add lowercase';
+                      if (!RegExp(r'\d').hasMatch(s)) return 'Add number';
                       if (!RegExp(r'[!@#\$%\^&*(),.?":{}|<>]').hasMatch(s))
-                        return 'Include at least one special character';
+                        return 'Add special character';
                       return null;
                     },
                   ),
@@ -104,12 +156,9 @@ class _SignupScreenState extends State<SignupScreen> {
                     ),
                     obscureText: true,
                     validator: (v) {
-                      if (v == null || v.isEmpty) {
-                        return 'Confirm password';
-                      }
-                      if (v != _passwordController.text) {
+                      if (v == null || v.isEmpty) return 'Confirm password';
+                      if (v != _passwordController.text)
                         return 'Passwords do not match';
-                      }
                       return null;
                     },
                   ),
@@ -118,8 +167,16 @@ class _SignupScreenState extends State<SignupScreen> {
                     children: [
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: _submit,
-                          child: const Text('Create account'),
+                          onPressed: _loading ? null : _submit,
+                          child: _loading
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Create account'),
                         ),
                       ),
                     ],

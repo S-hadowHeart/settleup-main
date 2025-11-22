@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class ForgotPasswordEmailScreen extends StatefulWidget {
   const ForgotPasswordEmailScreen({super.key});
@@ -11,17 +12,27 @@ class ForgotPasswordEmailScreen extends StatefulWidget {
 class _ForgotPasswordEmailScreenState extends State<ForgotPasswordEmailScreen> {
   final _emailController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+  bool _loading = false;
 
-  @override
-  void dispose() {
-    _emailController.dispose();
-    super.dispose();
-  }
+  Future<void> _sendReset() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() => _loading = true);
+    final email = _emailController.text.trim();
 
-  void _sendOtp() {
-    if (_formKey.currentState?.validate() ?? false) {
-      // In prototype, directly navigate to OTP screen
-      Navigator.of(context).pushReplacementNamed('/forgot-otp');
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Reset link sent. Check your email.')),
+        );
+        Navigator.of(context).pop();
+      }
+    } on FirebaseAuthException catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message ?? 'Error')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -46,13 +57,10 @@ class _ForgotPasswordEmailScreenState extends State<ForgotPasswordEmailScreen> {
                     decoration: const InputDecoration(labelText: 'Email'),
                     keyboardType: TextInputType.emailAddress,
                     validator: (v) {
-                      if (v == null || v.trim().isEmpty) {
-                        return 'Enter email';
-                      }
+                      if (v == null || v.trim().isEmpty) return 'Enter email';
                       final emailReg = RegExp(r"^[^@\s]+@[^@\s]+\.[^@\s]+$");
-                      if (!emailReg.hasMatch(v.trim())) {
+                      if (!emailReg.hasMatch(v.trim()))
                         return 'Enter a valid email';
-                      }
                       return null;
                     },
                   ),
@@ -61,8 +69,16 @@ class _ForgotPasswordEmailScreenState extends State<ForgotPasswordEmailScreen> {
                     children: [
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: _sendOtp,
-                          child: const Text('Send OTP'),
+                          onPressed: _loading ? null : _sendReset,
+                          child: _loading
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Send reset link'),
                         ),
                       ),
                     ],
