@@ -1,4 +1,4 @@
-import 'user.dart';
+import 'app_user.dart';
 
 class GroupMember {
   final AppUser user;

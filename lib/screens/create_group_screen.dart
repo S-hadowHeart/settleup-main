@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../services/mock_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../widgets/emoji_picker.dart';
 
 class CreateGroupScreen extends StatefulWidget {
@@ -14,7 +15,6 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   final _nameController = TextEditingController();
   final _memberController = TextEditingController();
   String _emoji = '😀';
-  final svc = MockService();
   final List<String> _members = [];
 
   @override
@@ -36,17 +36,99 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   }
 
   void _addMember() {
-    if (_memberController.text.trim().isEmpty) return;
+    final email = _memberController.text.trim();
+    if (email.isEmpty) return;
+    final emailReg = RegExp(r"^[^@\s]+@[^@\s]+\.[^@\s]+$");
+    if (!emailReg.hasMatch(email)) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Enter a valid email')));
+      return;
+    }
+    if (_members.contains(email)) {
+      _memberController.clear();
+      return;
+    }
     setState(() {
-      _members.add(_memberController.text.trim());
+      _members.add(email);
       _memberController.clear();
     });
   }
 
-  void _create() {
-    if (_formKey.currentState?.validate() ?? false) {
-      svc.createGroup(_nameController.text.trim(), _emoji, _members);
+  bool _isLoading = false;
+
+  Future<void> _create() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You must be signed in to create a group'),
+          ),
+        );
+        return;
+      }
+      final uid = currentUser.uid;
+      final name = _nameController.text.trim();
+
+      final usersRef = FirebaseFirestore.instance.collection('users');
+      final membersResolved = <String>[];
+
+      for (final email in _members) {
+        try {
+          final q = await usersRef
+              .where('email', isEqualTo: email)
+              .limit(1)
+              .get();
+          if (q.docs.isNotEmpty) {
+            membersResolved.add(q.docs.first.id);
+          } else {
+            final doc = usersRef.doc();
+            await doc.set({
+              'name': email.split('@')[0],
+              'email': email,
+              'emoji': '🙂',
+              'avatarUrl': null,
+              'createdAt': FieldValue.serverTimestamp(),
+            });
+            membersResolved.add(doc.id);
+          }
+        } catch (e, st) {
+          debugPrint('Error resolving/creating user for $email: $e\n$st');
+        }
+      }
+
+      if (!membersResolved.contains(uid)) membersResolved.insert(0, uid);
+
+      final ref = FirebaseFirestore.instance.collection('groups').doc();
+      await ref.set({
+        'name': name,
+        'emoji': _emoji,
+        'createdBy': uid,
+        'members': membersResolved,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Group created')));
       Navigator.of(context).pop();
+    } catch (e, st) {
+      debugPrint('Failed to create group: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: ${e.toString()}')));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -114,15 +196,22 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                           (m) => Chip(
                             label: Text(m),
                             backgroundColor: Colors.grey.shade100,
+                            onDeleted: () => setState(() => _members.remove(m)),
                           ),
                         )
                         .toList(),
                   ),
                   const SizedBox(height: 18),
                   ElevatedButton.icon(
-                    onPressed: _create,
-                    icon: const Icon(Icons.group_add),
-                    label: const Text('Create group'),
+                    onPressed: _isLoading ? null : _create,
+                    icon: _isLoading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.group_add),
+                    label: Text(_isLoading ? 'Creating…' : 'Create group'),
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
