@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
-import 'dart:io';
-import '../models/group.dart';
-import '../services/mock_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/emoji_picker.dart';
-import '../models/expense.dart';
 
 class GroupDetailsScreen extends StatefulWidget {
   const GroupDetailsScreen({super.key});
@@ -16,109 +14,10 @@ class GroupDetailsScreen extends StatefulWidget {
 
 class _GroupDetailsScreenState extends State<GroupDetailsScreen>
     with SingleTickerProviderStateMixin {
-  final svc = MockService();
-  final Set<String> _appliedSettlementKeys = {};
   late final TabController _tabController = TabController(
     length: 3,
     vsync: this,
   );
-
-  @override
-  Widget build(BuildContext context) {
-    final g = ModalRoute.of(context)!.settings.arguments as Group;
-    final expenses = svc.expenses.where((e) => e.groupId == g.id).toList();
-
-    return AppShell(
-      currentIndex: 1,
-      title: '${g.emoji} ${g.name}',
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        g.name,
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '${g.members.length} members',
-                        style: TextStyle(color: Colors.grey.shade600),
-                      ),
-                    ],
-                  ),
-                  ElevatedButton.icon(
-                    onPressed: () => _editGroup(g),
-                    icon: const Icon(Icons.edit),
-                    label: const Text('Edit'),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            TabBar(
-              controller: _tabController,
-              tabs: const [
-                Tab(text: 'Summary'),
-                Tab(text: 'Expenses'),
-                Tab(text: 'Balance'),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: _buildSummary(g, expenses),
-                  ),
-                  Column(
-                    children: [
-                      Expanded(child: _buildExpensesList(expenses)),
-                      Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: ElevatedButton.icon(
-                          onPressed: () => Navigator.pushNamed(
-                            context,
-                            '/add-expense',
-                            arguments: g.id,
-                          ),
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add expense'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: _buildBalanceSettleInteractive(g, expenses),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // helper to safely get a user's name by id; returns a fallback if not found
-  String _userNameById(String id) {
-    final idx = svc.users.indexWhere((u) => u.id == id);
-    if (idx >= 0) return svc.users[idx].name;
-    return 'Unknown';
-  }
 
   @override
   void dispose() {
@@ -126,183 +25,481 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
     super.dispose();
   }
 
-  Widget _buildSummary(Group g, List<Expense> expenses) {
-    final total = expenses.fold<double>(0.0, (p, e) => p + e.amount);
-    final yourShare = expenses.fold<double>(
-      0.0,
-      (p, e) => p + (e.splits[svc.currentUser.id] ?? 0.0),
-    );
+  Future<Map<String, dynamic>> _loadGroupAndMembers(String groupId) async {
+    final fire = FirebaseFirestore.instance;
+    final gdoc = await fire.collection('groups').doc(groupId).get();
+    final gdata = gdoc.data() ?? <String, dynamic>{};
+    final List members = (gdata['members'] as List<dynamic>?) ?? [];
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 6,
-          children: g.members
-              .map((m) => Chip(label: Text('${m.user.emoji} ${m.user.name}')))
-              .toList(),
-        ),
-        const SizedBox(height: 12),
+    final users = <String, Map<String, dynamic>>{};
+    if (members.isNotEmpty) {
+      final chunks = <List>[];
+      const chunkSize = 10;
+      for (var i = 0; i < members.length; i += chunkSize) {
+        chunks.add(members.sublist(i, math.min(i + chunkSize, members.length)));
+      }
+      for (final chunk in chunks) {
+        final q = await fire
+            .collection('users')
+            .where(FieldPath.documentId, whereIn: chunk)
+            .get();
+        for (final ud in q.docs) {
+          users[ud.id] = ud.data();
+        }
+      }
+    }
+    return {'group': gdata, 'users': users};
+  }
 
-        // Summary cards
-        Row(
-          children: [
-            Expanded(
-              child: Card(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Total spent',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '₹${total.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Card(
-                color: Theme.of(context).colorScheme.secondaryContainer,
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Your share',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '₹${yourShare.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
+  @override
+  Widget build(BuildContext context) {
+    final arg =
+        ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+    final groupId = arg['id'] as String;
+    final fire = FirebaseFirestore.instance;
 
-        const SizedBox(height: 12),
-        Card(
-          elevation: 0,
-          color: Theme.of(context).cardColor,
+    return StreamBuilder<DocumentSnapshot>(
+      stream: fire.collection('groups').doc(groupId).snapshots(),
+      builder: (context, gsnap) {
+        if (gsnap.hasError) {
+          return Scaffold(body: Center(child: Text('Error: ${gsnap.error}')));
+        }
+        if (!gsnap.hasData)
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        final gmap = gsnap.data!.data() as Map<String, dynamic>;
+        final members = (gmap['members'] as List<dynamic>?) ?? [];
+
+        return AppShell(
+          currentIndex: 1,
+          title: '${gmap['emoji'] ?? ''} ${gmap['name'] ?? 'Group'}',
           child: Padding(
-            padding: const EdgeInsets.all(12.0),
+            padding: const EdgeInsets.all(16.0),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text(
-                  'What is balance?',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            gmap['name'] ?? '',
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '${members.length} members',
+                            style: TextStyle(color: Colors.grey.shade600),
+                          ),
+                        ],
+                      ),
+                      ElevatedButton.icon(
+                        onPressed: () =>
+                            _editGroupDialog(context, groupId, gmap),
+                        icon: const Icon(Icons.edit),
+                        label: const Text('Edit'),
+                      ),
+                    ],
+                  ),
                 ),
-                SizedBox(height: 6),
-                Text(
-                  'Example: If you paid ₹300 for dinner split equally between 3 people, each owes ₹100. Your balance shows how much you have paid minus what you owe.',
+
+                const SizedBox(height: 8),
+                TabBar(
+                  controller: _tabController,
+                  tabs: const [
+                    Tab(text: 'Summary'),
+                    Tab(text: 'Expenses'),
+                    Tab(text: 'Balance'),
+                  ],
+                ),
+                const SizedBox(height: 8),
+
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      FutureBuilder<Map<String, dynamic>>(
+                        future: _loadGroupAndMembers(groupId),
+                        builder: (context, snap) {
+                          if (snap.hasError) {
+                            return Center(child: Text('Error: ${snap.error}'));
+                          }
+                          if (!snap.hasData)
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+                          final users =
+                              snap.data!['users'] as Map<String, dynamic>;
+                          return _buildSummaryUI(groupId, users);
+                        },
+                      ),
+
+                      StreamBuilder<QuerySnapshot>(
+                        stream: fire
+                            .collection('groups')
+                            .doc(groupId)
+                            .collection('expenses')
+                            .orderBy('createdAt', descending: true)
+                            .snapshots(),
+                        builder: (context, snap) {
+                          if (snap.hasError) {
+                            return Center(child: Text('Error: ${snap.error}'));
+                          }
+                          if (!snap.hasData)
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+                          final docs = snap.data!.docs;
+                          if (docs.isEmpty)
+                            return const Center(child: Text('No expenses yet'));
+                          return Column(
+                            children: [
+                              Expanded(
+                                child: ListView.separated(
+                                  itemCount: docs.length,
+                                  separatorBuilder: (_, __) => const Divider(),
+                                  itemBuilder: (context, idx) {
+                                    final e =
+                                        docs[idx].data()
+                                            as Map<String, dynamic>;
+                                    final title = e['title'] ?? '';
+                                    final amount = (e['amount'] ?? 0)
+                                        .toDouble();
+                                    final createdAt = e['createdAt'] != null
+                                        ? (e['createdAt'] as Timestamp).toDate()
+                                        : DateTime.now();
+                                    return ListTile(
+                                      title: Text(title),
+                                      subtitle: Text(
+                                        '₹${amount.toStringAsFixed(2)} • ${createdAt.toLocal().toString().split(' ').first}',
+                                      ),
+                                      onTap: () =>
+                                          _showExpenseDetails(context, e),
+                                    );
+                                  },
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.all(12.0),
+                                child: ElevatedButton.icon(
+                                  onPressed: () => Navigator.pushNamed(
+                                    context,
+                                    '/add-expense',
+                                    arguments: groupId,
+                                  ),
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('Add expense'),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+
+                      FutureBuilder<Map<String, dynamic>>(
+                        future: _loadGroupAndMembers(groupId),
+                        builder: (context, snap) {
+                          if (snap.hasError) {
+                            return Center(child: Text('Error: ${snap.error}'));
+                          }
+                          if (!snap.hasData)
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+                          final users =
+                              snap.data!['users'] as Map<String, dynamic>;
+                          return _buildBalanceUI(groupId, users);
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
-        ),
-
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: () => Navigator.pushNamed(
-                  context,
-                  '/add-expense',
-                  arguments: g.id,
-                ),
-                icon: const Icon(Icons.add),
-                label: const Text('Add expense'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () => _tabController.animateTo(2),
-                icon: const Icon(Icons.account_balance_wallet_outlined),
-                label: const Text('Balance / Settle'),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildExpensesList(List<Expense> expenses) {
-    if (expenses.isEmpty) return const Center(child: Text('No expenses yet'));
-    return ListView.separated(
-      itemCount: expenses.length,
-      separatorBuilder: (_, __) => const Divider(),
-      itemBuilder: (context, idx) {
-        final e = expenses[idx];
-        return ListTile(
-          title: Text(e.title),
-          subtitle: Text('₹${e.amount.toStringAsFixed(2)} • ${e.category}'),
-          trailing: Text(e.date.toLocal().toString().split(' ').first),
-          onTap: () => _showExpenseDetails(e),
         );
       },
     );
   }
 
-  void _showExpenseDetails(Expense e) {
+  Widget _buildSummaryUI(String groupId, Map<String, dynamic> usersById) {
+    final fire = FirebaseFirestore.instance;
+    return StreamBuilder<QuerySnapshot>(
+      stream: fire
+          .collection('groups')
+          .doc(groupId)
+          .collection('expenses')
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return Center(child: Text('Error: ${snap.error}'));
+        }
+        if (!snap.hasData)
+          return const Center(child: CircularProgressIndicator());
+        final expenses = snap.data!.docs
+            .map((d) => d.data() as Map<String, dynamic>)
+            .toList();
+        final total = expenses.fold<double>(
+          0.0,
+          (p, e) => p + ((e['amount'] ?? 0).toDouble()),
+        );
+        final currentUser = FirebaseAuth.instance.currentUser;
+        final uid = currentUser?.uid ?? '';
+        double yourShare = 0.0;
+        for (final e in expenses) {
+          final splits = (e['splits'] as Map<String, dynamic>?) ?? {};
+          yourShare += (splits[uid] ?? 0).toDouble();
+        }
+
+        final memberWidgets = usersById.entries.map((en) {
+          final u = en.value as Map<String, dynamic>;
+          final emoji = u['emoji'] ?? '🙂';
+          final name = u['name'] ?? u['email'] ?? '';
+          return Chip(label: Text('$emoji $name'));
+        }).toList();
+
+        return Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(spacing: 8, runSpacing: 6, children: memberWidgets),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Card(
+                      color: Theme.of(context).colorScheme.primaryContainer,
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Total spent',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '₹${total.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Card(
+                      color: Theme.of(context).colorScheme.secondaryContainer,
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Your share',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '₹${yourShare.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Card(
+                elevation: 0,
+                color: Theme.of(context).cardColor,
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Text(
+                        'What is balance?',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        'Example: If you paid ₹300 for dinner split equally between 3 people, each owes ₹100. Your balance shows how much you have paid minus what you owe.',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => Navigator.pushNamed(
+                        context,
+                        '/add-expense',
+                        arguments: groupId,
+                      ),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add expense'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _tabController.animateTo(2),
+                      icon: const Icon(Icons.account_balance_wallet_outlined),
+                      label: const Text('Balance / Settle'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBalanceUI(String groupId, Map<String, dynamic> usersById) {
+    final fire = FirebaseFirestore.instance;
+    return StreamBuilder<QuerySnapshot>(
+      stream: fire
+          .collection('groups')
+          .doc(groupId)
+          .collection('expenses')
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return Center(child: Text('Error: ${snap.error}'));
+        }
+        if (!snap.hasData)
+          return const Center(child: CircularProgressIndicator());
+        final docs = snap.data!.docs;
+        final Map<String, double> net = {};
+        usersById.keys.forEach((k) => net[k] = 0.0);
+
+        for (final d in docs) {
+          final e = d.data() as Map<String, dynamic>;
+          final amount = (e['amount'] ?? 0).toDouble();
+          final paidBy = e['paidBy'] as String? ?? '';
+          final splits = (e['splits'] as Map<String, dynamic>?) ?? {};
+
+          splits.forEach((uid, val) {
+            net[uid] = (net[uid] ?? 0) - (val.toDouble());
+          });
+          net[paidBy] = (net[paidBy] ?? 0) + amount;
+        }
+
+        final creditors = net.entries.where((e) => e.value > 0).toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+        final debtors = net.entries.where((e) => e.value < 0).toList()
+          ..sort((a, b) => a.value.compareTo(b.value));
+
+        final suggestions = <MapEntry<String, MapEntry<String, double>>>[];
+        int i = 0, j = 0;
+        while (i < creditors.length && j < debtors.length) {
+          final c = creditors[i];
+          final d = debtors[j];
+          final amount = math.min(c.value, -d.value);
+          suggestions.add(MapEntry(c.key, MapEntry(d.key, amount)));
+          creditors[i] = MapEntry(c.key, c.value - amount);
+          debtors[j] = MapEntry(d.key, d.value + amount);
+          if (creditors[i].value <= 0) i++;
+          if (debtors[j].value >= 0) j++;
+        }
+
+        if (suggestions.isEmpty)
+          return const Center(child: Text('All settled'));
+
+        return ListView.builder(
+          itemCount: suggestions.length,
+          itemBuilder: (context, idx) {
+            final s = suggestions[idx];
+            final creditorId = s.key;
+            final debtorId = s.value.key;
+            final amount = s.value.value;
+            final creditorName = (usersById[creditorId]?['name']) ?? 'Unknown';
+            final debtorName = (usersById[debtorId]?['name']) ?? 'Unknown';
+            return CheckboxListTile(
+              title: Text(
+                '$debtorName pays ₹${amount.toStringAsFixed(2)} to $creditorName',
+              ),
+              value: false,
+              onChanged: (_) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Marked: $debtorName → $creditorName ₹${amount.toStringAsFixed(2)}',
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showExpenseDetails(BuildContext context, Map<String, dynamic> e) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text(e.title),
+        title: Text(e['title'] ?? ''),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Amount: ₹${e.amount.toStringAsFixed(2)}'),
-            const SizedBox(height: 8),
-            Text('Paid by: ${_userNameById(e.paidByUserId)}'),
-            const SizedBox(height: 8),
-            Text('Splits:'),
-            ...e.splits.entries.map(
-              (s) => Text(
-                '${_userNameById(s.key)}: ₹${s.value.toStringAsFixed(2)}',
-              ),
+            Text(
+              'Amount: ₹${((e['amount'] ?? 0).toDouble()).toStringAsFixed(2)}',
             ),
             const SizedBox(height: 8),
-            if (e.attachmentPath != null) ...[
+            Text('Paid by: ${e['paidBy'] ?? 'Unknown'}'),
+            const SizedBox(height: 8),
+            Text('Splits:'),
+            const SizedBox(height: 6),
+            ...((e['splits'] as Map<String, dynamic>? ?? {}).entries.map(
+              (s) => Text('${s.key}: ₹${(s.value).toString()}'),
+            )),
+            if (e['attachmentUrl'] != null) ...[
               const SizedBox(height: 8),
               const Text('Attachment:'),
               const SizedBox(height: 6),
               SizedBox(
                 height: 160,
-                child: Image.file(File(e.attachmentPath!), fit: BoxFit.contain),
+                child: Image.network(e['attachmentUrl'], fit: BoxFit.contain),
               ),
             ],
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.pop(context),
             child: const Text('Close'),
           ),
         ],
@@ -310,150 +507,15 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
     );
   }
 
-  Widget _buildBalanceSettleInteractive(Group g, List<Expense> expenses) {
-    // build suggestions but keep selection local using StatefulBuilder
-    // calculate net per user
-    final Map<String, double> net = {};
-    for (var m in g.members) net[m.user.id] = 0.0;
-    for (var e in expenses) {
-      for (var entry in e.splits.entries) {
-        net[entry.key] = (net[entry.key] ?? 0) - entry.value;
-      }
-      net[e.paidByUserId] = (net[e.paidByUserId] ?? 0) + e.amount;
-    }
-
-    final creditors = net.entries.where((e) => e.value > 0).toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    final debtors = net.entries.where((e) => e.value < 0).toList()
-      ..sort((a, b) => a.value.compareTo(b.value));
-    final suggestions =
-        <
-          MapEntry<String, MapEntry<String, double>>
-        >[]; // creditorId -> (debtorId, amount)
-    int i = 0, j = 0;
-    while (i < creditors.length && j < debtors.length) {
-      final c = creditors[i];
-      final d = debtors[j];
-      final amount = math.min(c.value, -d.value);
-      suggestions.add(MapEntry(c.key, MapEntry(d.key, amount)));
-      creditors[i] = MapEntry(c.key, c.value - amount);
-      debtors[j] = MapEntry(d.key, d.value + amount);
-      if (creditors[i].value <= 0) i++;
-      if (debtors[j].value >= 0) j++;
-    }
-
-    // compute visible suggestions and keys once
-    final visible = <MapEntry<String, MapEntry<String, double>>>[];
-    final keys = <String>[];
-    for (var s in suggestions) {
-      final key = '${s.key}-${s.value.key}-${s.value.value}';
-      if (!_appliedSettlementKeys.contains(key)) {
-        visible.add(s);
-        keys.add(key);
-      }
-    }
-
-    // keep selection persistent while this widget is active
-    final selected = <int>{};
-
-    return StatefulBuilder(
-      builder: (context, setSt) {
-        return Column(
-          children: [
-            if (suggestions.isEmpty) const Text('All settled'),
-            if (visible.isNotEmpty)
-              Expanded(
-                child: ListView.builder(
-                  itemCount: visible.length,
-                  itemBuilder: (context, idx) {
-                    final s = visible[idx];
-                    final creditor = _userNameById(s.key);
-                    final debtor = _userNameById(s.value.key);
-                    final amount = s.value.value;
-                    return CheckboxListTile(
-                      title: Text(
-                        '$debtor pays ₹${amount.toStringAsFixed(2)} to $creditor',
-                      ),
-                      value: selected.contains(idx),
-                      onChanged: (v) => setSt(() {
-                        if (v == true)
-                          selected.add(idx);
-                        else
-                          selected.remove(idx);
-                      }),
-                    );
-                  },
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: selected.isEmpty
-                          ? null
-                          : () {
-                              // map selected indices to keys and suggestions in `visible`
-                              final chosen = selected
-                                  .map((i) => visible[i])
-                                  .toList();
-                              final chosenKeys = selected
-                                  .map((i) => keys[i])
-                                  .toList();
-                              _applySettlementSuggestions(
-                                chosen,
-                                chosenKeys,
-                                g,
-                              );
-                            },
-                      child: const Text('Settle selected'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _applySettlementSuggestions(
-    List<MapEntry<String, MapEntry<String, double>>> chosen,
-    List<String> chosenKeys,
-    Group g,
+  void _editGroupDialog(
+    BuildContext context,
+    String groupId,
+    Map<String, dynamic> group,
   ) {
-    // mark chosen suggestions as applied
-    setState(() {
-      _appliedSettlementKeys.addAll(chosenKeys);
-    });
-    // record settlements in the service so owed totals update elsewhere
-    for (final s in chosen) {
-      final creditorId = s.key;
-      final debtorId = s.value.key;
-      final amount = s.value.value;
-      svc.applySettlement(debtorId, creditorId, amount);
-    }
-    final msg = chosen
-        .map((s) {
-          final creditor = _userNameById(s.key);
-          final debtor = _userNameById(s.value.key);
-          final amount = s.value.value;
-          return '$debtor → $creditor: ₹${amount.toStringAsFixed(2)}';
-        })
-        .join('\n');
-    final summary = msg.isEmpty ? 'No items selected' : msg;
-    // show a transient snackbar instead of modal prototype dialog
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(summary), duration: const Duration(seconds: 3)),
-    );
-  }
-
-  void _editGroup(Group g) {
-    final nameC = TextEditingController(text: g.name);
-    String selectedEmoji = g.emoji;
+    final nameC = TextEditingController(text: group['name']);
+    String selectedEmoji = group['emoji'] ?? '😀';
     final emailC = TextEditingController();
+    var isSaving = false;
 
     showDialog(
       context: context,
@@ -478,7 +540,6 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
                       const SizedBox(width: 8),
                       TextButton.icon(
                         onPressed: () async {
-                          // open emoji picker modal
                           final picked = await showModalBottomSheet<String>(
                             context: context,
                             builder: (_) => EmojiPicker(
@@ -505,24 +566,64 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
                     style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    children: [
-                      for (var m in g.members)
-                        Chip(
-                          label: Text('${m.user.emoji} ${m.user.name}'),
-                          onDeleted: m.user.id == svc.currentUser.id
-                              ? null
-                              : () {
-                                  setSt(
-                                    () => g.members.removeWhere(
-                                      (mm) => mm.user.id == m.user.id,
+
+                  FutureBuilder<Map<String, dynamic>>(
+                    future: _loadGroupAndMembers(groupId),
+                    builder: (context, snap) {
+                      if (snap.hasError) {
+                        return Text('Error loading members: ${snap.error}');
+                      }
+                      if (!snap.hasData) {
+                        return const SizedBox(
+                          height: 48,
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      }
+                      final currentGroup =
+                          snap.data!['group'] as Map<String, dynamic>;
+                      final membersList =
+                          (currentGroup['members'] as List<dynamic>?) ?? [];
+                      final usersById =
+                          (snap.data!['users'] as Map<String, dynamic>) ?? {};
+
+                      if (membersList.isEmpty) return const Text('No members');
+
+                      return Wrap(
+                        spacing: 6,
+                        children: membersList.map<Widget>((mid) {
+                          final id = mid.toString();
+                          final u = usersById[id] as Map<String, dynamic>?;
+                          final display = u != null
+                              ? '${u['emoji'] ?? '🙂'} ${u['name'] ?? u['email'] ?? id}'
+                              : id;
+                          return Chip(
+                            label: Text(display),
+                            onDeleted: () async {
+                              try {
+                                await FirebaseFirestore.instance
+                                    .collection('groups')
+                                    .doc(groupId)
+                                    .update({
+                                      'members': FieldValue.arrayRemove([id]),
+                                      'updatedAt': FieldValue.serverTimestamp(),
+                                    });
+                                setSt(() {});
+                              } catch (e) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Failed to remove member: $e',
                                     ),
-                                  );
-                                },
-                        ),
-                    ],
+                                  ),
+                                );
+                              }
+                            },
+                          );
+                        }).toList(),
+                      );
+                    },
                   ),
+
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -535,7 +636,7 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
                         ),
                       ),
                       IconButton(
-                        onPressed: () {
+                        onPressed: () async {
                           final email = emailC.text.trim();
                           if (email.isEmpty) return;
                           final emailReg = RegExp(
@@ -549,13 +650,49 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
                             );
                             return;
                           }
-                          // create or get user explicitly for group editing
-                          final user = svc.getOrCreateUserByEmail(email);
-                          // avoid duplicates
-                          if (g.members.any((mm) => mm.user.id == user.id))
-                            return;
-                          setSt(() => g.members.add(GroupMember(user: user)));
-                          emailC.clear();
+
+                          setSt(() => isSaving = true);
+
+                          try {
+                            // find or create user doc
+                            final usersRef = FirebaseFirestore.instance
+                                .collection('users');
+                            final q = await usersRef
+                                .where('email', isEqualTo: email)
+                                .limit(1)
+                                .get();
+                            String uid;
+                            if (q.docs.isNotEmpty) {
+                              uid = q.docs.first.id;
+                            } else {
+                              final doc = usersRef.doc();
+                              await doc.set({
+                                'name': email.split('@')[0],
+                                'email': email,
+                                'emoji': '🙂',
+                                'avatarUrl': null,
+                                'createdAt': FieldValue.serverTimestamp(),
+                              });
+                              uid = doc.id;
+                            }
+                            await FirebaseFirestore.instance
+                                .collection('groups')
+                                .doc(groupId)
+                                .update({
+                                  'members': FieldValue.arrayUnion([uid]),
+                                  'updatedAt': FieldValue.serverTimestamp(),
+                                });
+                            emailC.clear();
+                            setSt(() {});
+                          } catch (e) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Failed to add member: $e'),
+                              ),
+                            );
+                          } finally {
+                            setSt(() => isSaving = false);
+                          }
                         },
                         icon: const Icon(Icons.add),
                       ),
@@ -570,12 +707,22 @@ class _GroupDetailsScreenState extends State<GroupDetailsScreen>
                 child: const Text('Cancel'),
               ),
               ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    g.name = nameC.text.trim();
-                    g.emoji = selectedEmoji;
-                  });
-                  Navigator.of(context).pop();
+                onPressed: () async {
+                  try {
+                    await FirebaseFirestore.instance
+                        .collection('groups')
+                        .doc(groupId)
+                        .update({
+                          'name': nameC.text.trim(),
+                          'emoji': selectedEmoji,
+                          'updatedAt': FieldValue.serverTimestamp(),
+                        });
+                    Navigator.of(context).pop();
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed to save: $e')),
+                    );
+                  }
                 },
                 child: const Text('Save'),
               ),

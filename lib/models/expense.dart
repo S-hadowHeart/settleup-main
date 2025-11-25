@@ -6,7 +6,7 @@ class Expense {
   final String category;
   final String paidByUserId;
   final DateTime date;
-  final Map<String, double> splits; // userId -> amount
+  final Map<String, double> splits;
   final String? attachmentPath;
 
   Expense({

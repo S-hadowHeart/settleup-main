@@ -3,7 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'screens/auth/splash_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
-import 'screens/auth/verify_otp_screen.dart';
+import 'screens/auth/verify_mail_screen.dart';
 import 'screens/auth/forgot_email_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/groups_screen.dart';
@@ -44,7 +44,7 @@ class MainApp extends StatelessWidget {
             '/': (_) => const SplashScreen(),
             '/login': (_) => const LoginScreen(),
             '/signup': (_) => const SignupScreen(),
-            '/verify-otp': (_) => const VerifyOtpScreen(),
+            '/verify-otp': (_) => const VerifyEmailScreen(),
             '/forgot-email': (_) => const ForgotPasswordEmailScreen(),
             '/home': (_) => const HomeScreen(),
             '/groups': (_) => const GroupsScreen(),
